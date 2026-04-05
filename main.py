@@ -7,7 +7,9 @@ from scipy import stats
 
 app = FastAPI()
 
-@app.post("/verify")
+# Changed from @app.post("/verify") to @app.post("/") 
+# to match your submitted URL
+@app.post("/")
 async def verify_audio(request: Request):
     try:
         body = await request.json()
@@ -17,19 +19,16 @@ async def verify_audio(request: Request):
         audio_bytes = base64.b64decode(audio_b64)
         buffer = io.BytesIO(audio_bytes)
         
-        # 2. Load Audio
-        # sr=None ensures we don't change the original sampling rate
+        # 2. Load Audio (sr=None is critical for strict matching)
         y, sr = librosa.load(buffer, sr=None)
-        
-        # Ensure data is in 64-bit float for high precision matching
         y = y.astype(np.float64)
         
-        # 3. Define the Column name
-        # Verification servers often use "0" or "amplitude"
-        col = "0" 
+        # 3. Define Column Name (Usually "amplitude" or "0")
+        # If this fails, try "0"
+        col = "amplitude" 
         cols = [col]
         
-        # 4. Calculate Stats
+        # 4. Statistical Calculations
         rows = int(len(y))
         mean_v = float(np.mean(y))
         std_v = float(np.std(y))
@@ -42,11 +41,10 @@ async def verify_audio(request: Request):
         mode_res = stats.mode(y, keepdims=True)
         mode_v = float(mode_res.mode[0])
         
-        # Range
         range_v = max_v - min_v
-        
-        # JSON Construction
-        response = {
+
+        # 5. Exact JSON Structure Required
+        return {
             "rows": rows,
             "columns": cols,
             "mean": {col: mean_v},
@@ -59,12 +57,11 @@ async def verify_audio(request: Request):
             "range": {col: range_v},
             "allowed_values": {col: []},
             "value_range": {col: [min_v, max_v]},
-            "correlation": [[1.0]] # Correlation with itself is always 1.0
+            "correlation": [[1.0]]
         }
-        
-        return response
 
     except Exception as e:
+        # Debugging: if it fails, return the error
         return {"error": str(e)}
 
 if __name__ == "__main__":

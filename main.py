@@ -1,34 +1,35 @@
 from fastapi import FastAPI, Request
 import base64
 import io
-import librosa
+import soundfile as sf
 import numpy as np
 from scipy import stats
 
 app = FastAPI()
 
-# Changed from @app.post("/verify") to @app.post("/") 
-# to match your submitted URL
 @app.post("/")
 async def verify_audio(request: Request):
     try:
-        body = await request.json()
-        audio_b64 = body.get("audio_base64")
+        data = await request.json()
+        audio_b64 = data.get("audio_base64")
         
-        # 1. Decode Base64 to Bytes
+        # Base64デコード
         audio_bytes = base64.b64decode(audio_b64)
-        buffer = io.BytesIO(audio_bytes)
         
-        # 2. Load Audio (sr=None is critical for strict matching)
-        y, sr = librosa.load(buffer, sr=None)
+        # 音声読み込み
+        with io.BytesIO(audio_bytes) as f:
+            y, sr = sf.read(f)
+        
+        # ステレオの場合はモノラル化
+        if len(y.shape) > 1:
+            y = np.mean(y, axis=1)
+
         y = y.astype(np.float64)
         
-        # 3. Define Column Name (Usually "amplitude" or "0")
-        # If this fails, try "0"
-        col = "amplitude" 
-        cols = [col]
+        # カラム名の設定
+        col = "amplitude"
         
-        # 4. Statistical Calculations
+        # 統計量の計算
         rows = int(len(y))
         mean_v = float(np.mean(y))
         std_v = float(np.std(y))
@@ -37,16 +38,16 @@ async def verify_audio(request: Request):
         max_v = float(np.max(y))
         median_v = float(np.median(y))
         
-        # Mode
+        # 最頻値
         mode_res = stats.mode(y, keepdims=True)
         mode_v = float(mode_res.mode[0])
         
         range_v = max_v - min_v
 
-        # 5. Exact JSON Structure Required
+        # 返却JSON構造 (エラーに基づき allowed_values を空に修正)
         return {
             "rows": rows,
-            "columns": cols,
+            "columns": [col],
             "mean": {col: mean_v},
             "std": {col: std_v},
             "variance": {col: var_v},
@@ -55,13 +56,11 @@ async def verify_audio(request: Request):
             "median": {col: median_v},
             "mode": {col: mode_v},
             "range": {col: range_v},
-            "allowed_values": {col: []},
+            "allowed_values": {},  # ここを空の辞書にする
             "value_range": {col: [min_v, max_v]},
-            "correlation": [[1.0]]
+            "correlation": []      # カラムが1つの場合は空リストを試行
         }
-
     except Exception as e:
-        # Debugging: if it fails, return the error
         return {"error": str(e)}
 
 if __name__ == "__main__":
